@@ -37,6 +37,38 @@ async function ask(messages, temperature = 0) {
   return res.choices[0].message.content.trim();
 }
 
+// 直近50件の履歴を要約（なければ "なし"）
+async function summarizeHistory(db, userId) {
+  const rows = await db.all(
+    `SELECT question_text, user_answer, expected_ans, is_correct, error_type, created_at
+       FROM questions
+      WHERE session_id IN (SELECT id FROM sessions WHERE user_id = ?)
+      ORDER BY datetime(created_at) DESC
+      LIMIT 50`,
+    [userId]
+  );
+  if (!rows.length) return 'なし';
+
+  const compact = rows.map(r =>
+    `- [${(r.created_at || '').slice(0,10)}] err:${r.error_type || (r.is_correct ? 'なし' : 'その他')} | Q:${r.question_text} | A:${r.user_answer}`
+  ).join('\n');
+
+  const summary = await ask(
+    [
+      { role: 'system', content: 'あなたは英語教師。履歴の弱点傾向を短く要約する。' },
+      {
+        role: 'user',
+        content:
+`次の履歴から、主な弱点カテゴリ（最大3つ）と改善傾向を箇条書き3〜6行で要約して。
+過度な詳細は不要。カテゴリ名は「冠詞/動詞選択/時制/前置詞/語順/単数複数/語法/スペリング/その他」から選ぶ。
+${compact}`
+      }
+    ],
+    0
+  );
+  return summary || 'なし';
+}
+
 async function getWeaknessFocus(db, userId) {
   const rows = await db.all(
     `SELECT category, frequency, last_occurred
@@ -53,16 +85,18 @@ async function main() {
   await setupSchema();
   const db = await getDB();
 
-  // ユーザー固定: default
+  // ユーザー固定: default（既存があれば再利用）
   const user =
     (await db.get('SELECT id FROM users WHERE name = ?', ['default'])) ??
     (await db.run('INSERT INTO users (name) VALUES (?)', ['default']) &&
       (await db.get('SELECT id FROM users WHERE name = ?', ['default'])));
   const userId = user.id;
 
-  // 弱点の取得（出題の指示に使う）
+  // 弱点と履歴要約を取得
   const weaknessFocus = await getWeaknessFocus(db, userId);
+  const historySummary = await summarizeHistory(db, userId);
   console.log('🔎 弱点フォーカス:', weaknessFocus);
+  console.log('🗂 履歴要約:\n' + historySummary + '\n');
 
   // セッション開始
   const sessionId = (await db.run(
@@ -70,7 +104,7 @@ async function main() {
     [userId]
   )).lastID;
 
-  // 出題（弱点を考慮）
+  // 出題（弱点＋履歴要約を考慮）
   const question = await ask(
     [
       {
@@ -83,8 +117,10 @@ async function main() {
         role: 'user',
         content:
 `学習者の既知の弱点: ${weaknessFocus}
-上の弱点（例: 冠詞/動詞選択/時制/前置詞/語順/単数複数/語法）を自然に試せる内容を優先して、
-基礎〜中級レベルで英訳する日本語文を1問だけ出題して。`
+過去の履歴要約:
+${historySummary}
+
+上の情報を踏まえ、基礎〜中級レベルで英訳する日本語文を1問だけ出題して。弱点を自然に試せる内容を優先。`
       }
     ],
     0.3
