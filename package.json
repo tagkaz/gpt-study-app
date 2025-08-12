@@ -1,0 +1,20 @@
+{
+  "name": "gpt-study-app",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node app.js",
+    "init:db": "node init-db.js",
+    "test": "echo \"no test\" && exit 0"
+  },
+  "dependencies": {
+    "openai": "^5.12.2",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^5.1.7",
+    "dotenv": "^16.4.5"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

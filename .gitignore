@@ -1,0 +1,3 @@
+printf "node_modules/\n.env\n*.db\ngpt-study.db\n.DS_Store\n" > .gitignore
+.env
+gpt-study.db
